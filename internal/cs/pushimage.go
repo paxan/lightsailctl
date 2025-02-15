@@ -24,6 +24,20 @@ type PushImageInput struct {
 	Label   string
 }
 
+type PushImageOutput struct {
+	Digest      string `json:"digest"`
+	Image       string `json:"image"`
+	PushedImage string `json:"pushedImage"`
+}
+
+func (r *PushImageOutput) String() string {
+	return fmt.Sprintf("Digest: %s\nImage %q registered.\nRefer to this image as %q in deployments.",
+		r.Digest,
+		r.Image,
+		r.PushedImage,
+	)
+}
+
 type RegistryLoginCreator interface {
 	CreateContainerServiceRegistryLogin(
 		context.Context,
@@ -49,26 +63,28 @@ type ImageOperator interface {
 }
 
 // PushImage pushes and registers the image to Lightsail service registry.
-func PushImage(ctx context.Context, in *PushImageInput, lio LightsailImageOperator, imgo ImageOperator) error {
+func PushImage(
+	ctx context.Context, in *PushImageInput, lio LightsailImageOperator, imgo ImageOperator,
+) (*PushImageOutput, error) {
 	authConfig, err := getServiceRegistryAuth(ctx, lio)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	remoteImage := RemoteImage{AuthConfig: *authConfig, Tag: generateUniqueTag()}
 
 	err = imgo.TagImage(ctx, in.Image, remoteImage.Ref())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tryUntagImage(ctx, imgo, remoteImage.Ref())
 
 	digest, err := imgo.PushImage(ctx, remoteImage)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	registered, err := lio.RegisterContainerImage(
+	pushed, err := lio.RegisterContainerImage(
 		ctx,
 		&lightsail.RegisterContainerImageInput{
 			ServiceName: &in.Service,
@@ -77,15 +93,14 @@ func PushImage(ctx context.Context, in *PushImageInput, lio LightsailImageOperat
 		},
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	fmt.Printf("Digest: %s\nImage %q registered.\nRefer to this image as %q in deployments.\n",
-		aws.ToString(registered.ContainerImage.Digest),
-		in.Image,
-		aws.ToString(registered.ContainerImage.Image))
-
-	return nil
+	return &PushImageOutput{
+		Image:       in.Image,
+		Digest:      aws.ToString(pushed.ContainerImage.Digest),
+		PushedImage: aws.ToString(pushed.ContainerImage.Image),
+	}, nil
 }
 
 // getServiceRegistryAuth returns the server address and

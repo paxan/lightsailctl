@@ -106,17 +106,9 @@ func TestGetLatestLightsailctlVersion(t *testing.T) {
 		},
 	} {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
-			gotErr := ""
 			gotVer, err := getLatestLightsailctlVersion(ctx, fakeContainerAPIMetadataGetter(c.input))
-			if err != nil {
-				gotErr = err.Error()
-			}
-			if c.wantErr != gotErr {
-				t.Errorf("got error %q, want error %q", gotErr, c.wantErr)
-			}
-			if c.wantVer != gotVer {
-				t.Errorf("got ver %q, want ver %q", gotVer, c.wantVer)
-			}
+			AssertErr(t, c.wantErr, err)
+			Assert(t, "version", c.wantVer, gotVer)
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aws/lightsailctl/internal"
 	"github.com/docker/docker/pkg/jsonmessage"
 )
 
@@ -21,10 +22,7 @@ func TestExtractDigest(t *testing.T) {
 	wantDigest := "sha256:b95cf9b496720e43b12ce435775d5e337a6648147825c0fc8fc0ff93616c69a0"
 	goodAux := json.RawMessage(`{"digest": "` + wantDigest + `"}`)
 	extractDigest(&got)(jsonmessage.JSONMessage{Aux: &goodAux})
-	if got != wantDigest {
-		t.Errorf("got: %q", got)
-		t.Logf("want: %q", wantDigest)
-	}
+	internal.Assert(t, "digest", wantDigest, got)
 }
 
 func Example_skipStatuses() {

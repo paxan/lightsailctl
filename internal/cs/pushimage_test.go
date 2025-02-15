@@ -6,7 +6,6 @@ package cs
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/lightsail"
 	"github.com/aws/aws-sdk-go-v2/service/lightsail/types"
+	"github.com/aws/lightsailctl/internal"
 	"github.com/docker/docker/api/types/registry"
 )
 
@@ -24,28 +24,36 @@ func TestGenerateUniqueTag(t *testing.T) {
 	}()
 	testNow = func() time.Time { return time.Unix(0, 1593224653252075123) }
 	testRngReader = strings.NewReader("abcdefgh")
-	if want, got := "1593224653252075123-c5h66p35cpjmg", generateUniqueTag(); got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
+	internal.Assert(t, "unique tag", "1593224653252075123-c5h66p35cpjmg", generateUniqueTag())
 }
 
 func TestGetServiceRegistryAuth(t *testing.T) {
-	ctx := context.Background()
-	if got, err := getServiceRegistryAuth(ctx, &fakeRegistryLoginCreator{failToCreateLogin: true}); err == nil || got != nil {
-		t.Errorf("got err: %v", err)
-		t.Errorf("got out: %#v", got)
-	}
-
-	want := &registry.AuthConfig{
-		Username:      "gollum",
-		Password:      "precious",
-		ServerAddress: "123456789012.dkr.ecr.so-fake-2.amazonaws.com/sr",
-	}
-	if got, err := getServiceRegistryAuth(ctx, &fakeRegistryLoginCreator{}); err != nil {
-		t.Errorf("got err: %v", err)
-	} else if !reflect.DeepEqual(got, want) {
-		t.Errorf("got: %#v", got)
-		t.Logf("want: %#v", want)
+	for _, test := range []struct {
+		name    string
+		rlc     fakeRegistryLoginCreator
+		wantErr string
+		want    *registry.AuthConfig
+	}{
+		{
+			name:    "login failed",
+			rlc:     fakeRegistryLoginCreator{failToCreateLogin: true},
+			wantErr: "failed: create login",
+		},
+		{
+			name: "login created",
+			want: &registry.AuthConfig{
+				Username:      "gollum",
+				Password:      "precious",
+				ServerAddress: "123456789012.dkr.ecr.so-fake-2.amazonaws.com/sr",
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			got, err := getServiceRegistryAuth(ctx, &test.rlc)
+			internal.AssertErr(t, test.wantErr, err)
+			internal.Assert(t, "AuthConfig", test.want, got)
+		})
 	}
 }
 
@@ -62,7 +70,7 @@ func TestPushImageErrors(t *testing.T) {
 		want string
 	}
 	ctx := context.Background()
-	in := &PushImageInput{Service: "doge", Image: "nginx:latest", Label: "www"}
+	in := &PushImageInput{Service: "hello", Image: "nginx:latest", Label: "www"}
 	for i, test := range []test{
 		{
 			ls:   fakeLightsailImageOperator{fakeRegistryLoginCreator: fakeRegistryLoginCreator{failToCreateLogin: true}},
@@ -70,7 +78,7 @@ func TestPushImageErrors(t *testing.T) {
 		},
 		{
 			ls:   fakeLightsailImageOperator{failToRegister: true},
-			want: "failed: register (doge, www, sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa)",
+			want: "failed: register (hello, www, sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa)",
 		},
 		{
 			imgo: fakeImageOperator{failToTag: true},
@@ -87,19 +95,8 @@ func TestPushImageErrors(t *testing.T) {
 	} {
 		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
 			testRngReader = strings.NewReader("abcdefgh")
-			err := PushImage(ctx, in, &test.ls, &test.imgo)
-			if err == nil && test.want == "" {
-				// succeeded as expected
-				return
-			}
-			if err == nil {
-				t.Error("unexpectedly succeeded")
-				return
-			}
-			if err.Error() != test.want {
-				t.Errorf("got: %v", err)
-				t.Logf("want: %v", test.want)
-			}
+			_, err := PushImage(ctx, in, &test.ls, &test.imgo)
+			internal.AssertErr(t, test.want, err)
 		})
 	}
 }
@@ -114,10 +111,12 @@ func ExamplePushImage() {
 	ctx := context.Background()
 	fls := &fakeLightsailImageOperator{}
 	fimgo := &fakeImageOperator{}
-	if err := PushImage(ctx, &PushImageInput{Service: "doge", Image: "nginx:latest", Label: "www"}, fls, fimgo); err != nil {
+	pushed, err := PushImage(ctx, &PushImageInput{Service: "hello", Image: "nginx:latest", Label: "www"}, fls, fimgo)
+	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	fmt.Println(pushed)
 	fmt.Println("docker engine call log:")
 	for _, s := range fimgo.log {
 		fmt.Println(" ", s)
@@ -129,14 +128,14 @@ func ExamplePushImage() {
 	// Output:
 	// Digest: sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa
 	// Image "nginx:latest" registered.
-	// Refer to this image as ":doge.www.12345" in deployments.
+	// Refer to this image as ":hello.www.12345" in deployments.
 	// docker engine call log:
 	//   tag "nginx:latest" as "123456789012.dkr.ecr.so-fake-2.amazonaws.com/sr:1611796436000000000-c5h66p35cpjmg"
 	//   push "123456789012.dkr.ecr.so-fake-2.amazonaws.com/sr:1611796436000000000-c5h66p35cpjmg"
 	//   untag "123456789012.dkr.ecr.so-fake-2.amazonaws.com/sr:1611796436000000000-c5h66p35cpjmg"
 	// lightsail api call log:
 	//   create login
-	//   register (doge, www, sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa)
+	//   register (hello, www, sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa)
 }
 
 type fakeRegistryLoginCreator struct {

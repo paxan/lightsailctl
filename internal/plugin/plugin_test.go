@@ -5,12 +5,13 @@ package plugin
 
 import (
 	"fmt"
-	"reflect"
+	"io"
 	"strconv"
 	"strings"
 	"testing"
 	"testing/quick"
 
+	"github.com/aws/lightsailctl/internal"
 	"github.com/aws/lightsailctl/internal/cs"
 )
 
@@ -77,9 +78,7 @@ func TestParseInput(t *testing.T) {
 		Configuration: OperationConfig{Region: "us-west-2", CLIVersion: "2.0.47"},
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %#v, want %#v", got, want)
-	}
+	internal.Assert(t, "parsed input", want, got)
 }
 
 func TestParsePushContainerImagePayload(t *testing.T) {
@@ -91,24 +90,23 @@ func TestParsePushContainerImagePayload(t *testing.T) {
 	}`
 
 	for i, test := range []struct {
-		pass                 bool
-		payload, errContains string
-		want                 *cs.PushImageInput
+		payload string
+		wantErr string
+		want    *cs.PushImageInput
 	}{
 		{
-			payload:     `{"service": "dyservicev3", "image": "hello:latest"}`,
-			errContains: "container label",
+			payload: `{"service": "dyservicev3", "image": "hello:latest"}`,
+			wantErr: "push container image: container label is not specified",
 		},
 		{
-			payload:     `{"service": "dyservicev3", "label": "david16"}`,
-			errContains: "container image",
+			payload: `{"service": "dyservicev3", "label": "david16"}`,
+			wantErr: "push container image: container image is not specified",
 		},
 		{
-			payload:     `{"image": "hello:latest", "label": "david16"}`,
-			errContains: "service name",
+			payload: `{"image": "hello:latest", "label": "david16"}`,
+			wantErr: "push container image: service name is not specified",
 		},
 		{
-			pass:    true,
 			payload: `{"service": "dyservicev3", "image": "hello:latest", "label": "david16"}`,
 			want:    &cs.PushImageInput{Service: "dyservicev3", Image: "hello:latest", Label: "david16"},
 		},
@@ -121,22 +119,51 @@ func TestParsePushContainerImagePayload(t *testing.T) {
 			}
 
 			got, err := parsePushContainerImagePayload(in.Payload)
-			if test.pass {
-				if err != nil {
-					t.Error(err)
-				}
-				if !reflect.DeepEqual(got, test.want) {
-					t.Errorf("got %#v, want %#v", got, test.want)
-				}
-				return
+			internal.AssertErr(t, test.wantErr, err)
+			internal.Assert(t, "PushImageInput", test.want, got)
+		})
+	}
+}
+
+func TestOutputFormat(t *testing.T) {
+	for _, test := range []struct {
+		output      OutputFormat
+		wantErr     string
+		wantEncoded string
+		ioFailure   bool
+	}{
+		{
+			output:      "json",
+			wantEncoded: `{"digest":"sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa","image":"nginx","pushedImage":":nginx.www.35"}`,
+		},
+		{
+			output: "text",
+			wantEncoded: `Digest: sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa
+Image "nginx" registered.
+Refer to this image as ":nginx.www.35" in deployments.`,
+		},
+		{
+			output:    "other",
+			ioFailure: true,
+			wantErr:   `format *cs.PushImageOutput as "text": io: read/write on closed pipe`,
+		},
+	} {
+		t.Run(string(test.output), func(t *testing.T) {
+			sb := &strings.Builder{}
+			var w io.Writer = sb
+			if test.ioFailure {
+				// Provoke an IO failure!
+				pr, pw := io.Pipe()
+				pr.Close()
+				w = pw
 			}
-			if err == nil {
-				t.Error("unexpectedly succeeded")
-				return
-			}
-			if !strings.Contains(err.Error(), test.errContains) {
-				t.Errorf("got err: %v, that doesn't contain %q", err, test.errContains)
-			}
+			err := test.output.encode(w, &cs.PushImageOutput{
+				Digest:      "sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa",
+				Image:       "nginx",
+				PushedImage: ":nginx.www.35",
+			})
+			internal.AssertErr(t, test.wantErr, err)
+			internal.Assert(t, "encoded output", test.wantEncoded, strings.TrimSpace(sb.String()))
 		})
 	}
 }

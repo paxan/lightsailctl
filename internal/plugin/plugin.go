@@ -77,15 +77,37 @@ type Input struct {
 }
 
 type OperationConfig struct {
-	Debug          bool   `json:"debug,omitempty"`
-	Endpoint       string `json:"endpoint,omitempty"`
-	Region         string `json:"region,omitempty"`
-	Profile        string `json:"profile,omitempty"`
-	CABundle       string `json:"caBundle,omitempty"`
-	DoNotVerifySSL bool   `json:"doNotVerifySSL,omitempty"`
+	Output         OutputFormat `json:"output,omitempty"`
+	Debug          bool         `json:"debug,omitempty"`
+	Endpoint       string       `json:"endpoint,omitempty"`
+	Region         string       `json:"region,omitempty"`
+	Profile        string       `json:"profile,omitempty"`
+	CABundle       string       `json:"caBundle,omitempty"`
+	DoNotVerifySSL bool         `json:"doNotVerifySSL,omitempty"`
 	// CLIVersion is the version of the calling CLI,
 	// for diagnostics and logging purposes.
 	CLIVersion string `json:"cliVersion"`
+}
+
+type OutputFormat string
+
+func (f OutputFormat) encode(w io.Writer, value interface{ String() string }) (err error) {
+	switch f {
+	case "json":
+		enc := json.NewEncoder(w)
+		err = enc.Encode(value)
+	default:
+		// Assume output is text in case an older version of AWS CLI Lightsail
+		// push-container-image customization is being used.
+		f = "text"
+		_, err = fmt.Fprintln(w, value)
+	}
+
+	if err != nil {
+		err = fmt.Errorf("format %T as %q: %w", value, f, err)
+	}
+
+	return err
 }
 
 func (c *OperationConfig) awsConfig(ctx context.Context) (aws.Config, error) {
@@ -163,8 +185,13 @@ func invokeOperation(ctx context.Context, in *Input, debugLog *log.Logger) error
 			return err
 		}
 
-		if err := cs.PushImage(ctx, r, ls, dc); err != nil {
+		pushed, err := cs.PushImage(ctx, r, ls, dc)
+		if err != nil {
 			return err
+		}
+
+		if err := in.Configuration.Output.encode(os.Stdout, pushed); err != nil {
+			log.Print(err)
 		}
 	default:
 		return fmt.Errorf("unknown plugin operation: %q", in.Operation)
