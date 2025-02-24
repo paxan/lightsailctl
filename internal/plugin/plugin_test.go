@@ -158,9 +158,9 @@ Refer to this image as ":nginx.www.35" in deployments.`,
 				w = pw
 			}
 			err := test.output.encode(w, &cs.PushImageOutput{
-				Digest:      "sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa",
-				Image:       "nginx",
-				PushedImage: ":nginx.www.35",
+				Digest:          "sha256:10b8cc432d56da8b61b070f4c7d2543a9ed17c2b23010b43af434fd40e2ca4aa",
+				Image:           "nginx",
+				RegisteredImage: ":nginx.www.35",
 			})
 			internal.AssertErr(t, test.wantErr, err)
 			internal.Assert(t, "encoded output", test.wantEncoded, strings.TrimSpace(sb.String()))

@@ -25,16 +25,16 @@ type PushImageInput struct {
 }
 
 type PushImageOutput struct {
-	Digest      string `json:"digest"`
-	Image       string `json:"image"`
-	PushedImage string `json:"pushedImage"`
+	Digest          string `json:"digest"`
+	Image           string `json:"image"`
+	RegisteredImage string `json:"pushedImage"`
 }
 
 func (r *PushImageOutput) String() string {
 	return fmt.Sprintf("Digest: %s\nImage %q registered.\nRefer to this image as %q in deployments.",
 		r.Digest,
 		r.Image,
-		r.PushedImage,
+		r.RegisteredImage,
 	)
 }
 
@@ -84,7 +84,7 @@ func PushImage(
 		return nil, err
 	}
 
-	pushed, err := lio.RegisterContainerImage(
+	registered, err := lio.RegisterContainerImage(
 		ctx,
 		&lightsail.RegisterContainerImageInput{
 			ServiceName: &in.Service,
@@ -97,9 +97,9 @@ func PushImage(
 	}
 
 	return &PushImageOutput{
-		Image:       in.Image,
-		Digest:      aws.ToString(pushed.ContainerImage.Digest),
-		PushedImage: aws.ToString(pushed.ContainerImage.Image),
+		Image:           in.Image,
+		Digest:          aws.ToString(registered.ContainerImage.Digest),
+		RegisteredImage: aws.ToString(registered.ContainerImage.Image),
 	}, nil
 }
 
